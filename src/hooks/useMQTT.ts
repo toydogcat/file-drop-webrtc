@@ -95,6 +95,7 @@ export function useMQTT(roomId: string, myId: string, myName: string, role: 'idl
   return {
     isConnected,
     lobbyPlayers,
+    setLobbyPlayers,
     sendSignal,
     syncLobby,
     onSignalReceived,

@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react';
-import type { FileMetadata, FileTransferState, DataChannelMessage } from '../types';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import type { FileMetadata, FileTransferState, DataChannelMessage, ChatMessage } from '../types';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -11,7 +11,13 @@ const RTC_CONFIG: RTCConfiguration = {
 
 const CHUNK_SIZE = 16384; // 16KB
 
-export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => void) {
+export function useWebRTC(
+  _myId: string, 
+  sendSignal: (to: string, data: any) => void,
+  onChatMessage?: (senderId: string, msg: ChatMessage) => void,
+  onPeerDisconnected?: (id: string) => void,
+  chatMessages?: ChatMessage[]
+) {
   const [connections, setConnections] = useState<Map<string, RTCIceConnectionState>>(new Map());
   const [activeTransfers, setActiveTransfers] = useState<FileTransferState[]>([]);
   const [filesList, setFilesList] = useState<FileMetadata[]>([]);
@@ -26,6 +32,29 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
     mimeType: string;
     size: number;
   }>>(new Map());
+
+  const filesListRef = useRef<FileMetadata[]>([]);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  const onChatMessageRef = useRef(onChatMessage);
+  const onPeerDisconnectedRef = useRef(onPeerDisconnected);
+
+  useEffect(() => {
+    filesListRef.current = filesList;
+  }, [filesList]);
+
+  useEffect(() => {
+    if (chatMessages) {
+      chatMessagesRef.current = chatMessages;
+    }
+  }, [chatMessages]);
+
+  useEffect(() => {
+    onChatMessageRef.current = onChatMessage;
+  }, [onChatMessage]);
+
+  useEffect(() => {
+    onPeerDisconnectedRef.current = onPeerDisconnected;
+  }, [onPeerDisconnected]);
 
   const updateConnectionState = (id: string, state: RTCIceConnectionState) => {
     setConnections(prev => {
@@ -51,6 +80,9 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
       next.delete(id);
       return next;
     });
+    if (onPeerDisconnectedRef.current) {
+      onPeerDisconnectedRef.current(id);
+    }
   }, []);
 
   const setupPC = useCallback((id: string) => {
@@ -210,12 +242,32 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
       case 'TRANSFER_CANCEL':
         setActiveTransfers(prev => prev.map(t => t.id === msg.fileId ? { ...t, status: 'failed', error: msg.reason } : t));
         break;
+      case 'CHAT_MESSAGE':
+        if (onChatMessageRef.current) {
+          onChatMessageRef.current(fromId, msg.message);
+        }
+        break;
+      case 'CHAT_HISTORY':
+        if (onChatMessageRef.current) {
+          msg.messages.forEach(m => onChatMessageRef.current!(fromId, m));
+        }
+        break;
     }
   }, []);
 
   const setupChannel = useCallback((id: string, channel: RTCDataChannel) => {
     channelsRef.current.set(id, channel);
-    channel.onopen = () => console.log(`DataChannel to ${id} open`);
+    channel.onopen = () => {
+      console.log(`DataChannel to ${id} open`);
+      // Sync shared files list to the newly connected peer if we have any files
+      if (filesListRef.current.length > 0) {
+        channel.send(JSON.stringify({ type: 'FILE_LIST', files: filesListRef.current }));
+      }
+      // Sync chat history to the newly connected peer if we have any messages
+      if (chatMessagesRef.current.length > 0) {
+        channel.send(JSON.stringify({ type: 'CHAT_HISTORY', messages: chatMessagesRef.current }));
+      }
+    };
     channel.onmessage = (e) => handleDataMessage(id, e.data);
     channel.onclose = () => cleanupConnection(id);
   }, [cleanupConnection, handleDataMessage]);

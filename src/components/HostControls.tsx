@@ -80,7 +80,12 @@ export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFi
           <input 
             type="file" 
             ref={fileInputRef} 
-            onChange={(e) => e.target.files?.[0] && onAddFile(e.target.files[0])}
+            onChange={(e) => {
+              if (e.target.files?.[0]) {
+                onAddFile(e.target.files[0]);
+                e.target.value = '';
+              }
+            }}
             className="hidden" 
           />
         </div>

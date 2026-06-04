@@ -19,6 +19,14 @@ export interface FileTransferState {
   error?: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface PeerDetails {
   socketId: string; // In MQTT context, this is the client ID
   connectionState: RTCIceConnectionState;
@@ -32,7 +40,9 @@ export type DataChannelMessage =
   | { type: "FILE_START"; fileId: string; totalChunks: number; name: string; mimeType: string; size: number; action?: "preview" | "download" }
   | { type: "FILE_CHUNK"; fileId: string; chunkIndex: number; data: string } // base64 string
   | { type: "FILE_END"; fileId: string }
-  | { type: "TRANSFER_CANCEL"; fileId: string; reason: string };
+  | { type: "TRANSFER_CANCEL"; fileId: string; reason: string }
+  | { type: "CHAT_MESSAGE"; message: ChatMessage }
+  | { type: "CHAT_HISTORY"; messages: ChatMessage[] };
 
 // MQTT Signaling Protocol
 export type SignalingMessage = 

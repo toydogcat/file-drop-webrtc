@@ -7,6 +7,8 @@ import { HostControls } from './components/HostControls';
 import { GuestView } from './components/GuestView';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { CameraQRScanner } from './components/CameraQRScanner';
+import { Chatroom } from './components/Chatroom';
+import type { ChatMessage } from './types';
 import { Share2, FolderOpen, Globe, Users } from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -17,6 +19,7 @@ export default function App() {
   const [roomId, setRoomId] = useState('');
   const [myName, setMyName] = useState('');
   const [showScanner, setShowScanner] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   
   const myId = useMemo(() => generateId(), []);
   
@@ -28,11 +31,34 @@ export default function App() {
   const { 
     isConnected: isMQTTConnected, 
     lobbyPlayers, 
+    setLobbyPlayers,
     sendSignal, 
     syncLobby, 
     onSignalReceived, 
     onPlayerJoined 
   } = useMQTT(roomId, myId, myName, role);
+
+  const handleChatMessage = (fromId: string, msg: ChatMessage) => {
+    setChatMessages(prev => {
+      if (prev.some(m => m.id === msg.id)) return prev;
+      return [...prev, msg];
+    });
+
+    // Host relays the message to all other guests
+    if (role === 'host') {
+      connections.forEach((state, id) => {
+        if (id !== fromId && (state === 'connected' || state === 'completed')) {
+          sendDataMessage(id, { type: 'CHAT_MESSAGE', message: msg });
+        }
+      });
+    }
+  };
+
+  const handlePeerDisconnected = (id: string) => {
+    if (role === 'host') {
+      setLobbyPlayers(prev => prev.filter(p => p.id !== id));
+    }
+  };
 
   const {
     connections,
@@ -44,7 +70,25 @@ export default function App() {
     handleSignal,
     broadcastFileList,
     sendDataMessage
-  } = useWebRTC(myId, sendSignal);
+  } = useWebRTC(myId, sendSignal, handleChatMessage, handlePeerDisconnected, chatMessages);
+
+  const handleSendMessage = (text: string) => {
+    const newMsg: ChatMessage = {
+      id: `chat-${generateId()}`,
+      senderId: myId,
+      senderName: myName || '訪客',
+      text,
+      timestamp: Date.now()
+    };
+    setChatMessages(prev => [...prev, newMsg]);
+
+    // Send chat message to all connected peers
+    connections.forEach((state, id) => {
+      if (state === 'connected' || state === 'completed') {
+        sendDataMessage(id, { type: 'CHAT_MESSAGE', message: newMsg });
+      }
+    });
+  };
 
   const activeConnectionsCount = useMemo(() => {
     return Array.from(connections.values()).filter(state => state === 'connected' || state === 'completed').length;
@@ -56,12 +100,16 @@ export default function App() {
       handleSignal(from, sdp, ice);
     };
 
-    onPlayerJoined.current = (id) => {
+    onPlayerJoined.current = (id, name) => {
       if (role === 'host') {
+        setLobbyPlayers(prev => {
+          if (prev.some(p => p.id === id)) return prev;
+          return [...prev, { id, name }];
+        });
         initiateOffer(id);
       }
     };
-  }, [role, handleSignal, initiateOffer, onSignalReceived, onPlayerJoined]);
+  }, [role, handleSignal, initiateOffer, onSignalReceived, onPlayerJoined, setLobbyPlayers]);
 
   // Host: Keep lobby in sync
   useEffect(() => {
@@ -214,13 +262,18 @@ export default function App() {
                 )}
               </div>
 
-              {role === 'host' && (
-                <div className="lg:w-80">
-                  <div className="sticky top-24">
-                    <RoomQRCode roomId={roomId} />
-                  </div>
-                </div>
-              )}
+              <div className="lg:w-80 space-y-6">
+                {role === 'host' && (
+                  <RoomQRCode roomId={roomId} />
+                )}
+                <Chatroom
+                  messages={chatMessages}
+                  onSendMessage={handleSendMessage}
+                  myId={myId}
+                  lobbyPlayers={lobbyPlayers}
+                  hostId={role === 'host' ? myId : (lobbyPlayers[0]?.id || '')}
+                />
+              </div>
             </div>
           </div>
         )}
