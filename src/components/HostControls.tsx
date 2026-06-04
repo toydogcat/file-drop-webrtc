@@ -1,6 +1,7 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { FileMetadata, FileTransferState } from '../types';
-import { Upload, Trash2, Users, FileText, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, Trash2, Users, FileText, CheckCircle2, Loader2, Eye } from 'lucide-react';
+import { FilePreviewModal } from './FilePreviewModal';
 
 interface Props {
   roomId: string;
@@ -9,10 +10,37 @@ interface Props {
   onAddFile: (file: File) => void;
   onRemoveFile: (id: string) => void;
   connectionsCount: number;
+  getFile: (id: string) => File | undefined;
 }
 
-export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFile, connectionsCount }: Props) {
+export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFile, connectionsCount, getFile }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewTransfer, setPreviewTransfer] = useState<FileTransferState | null>(null);
+
+  const handlePreview = (fileId: string) => {
+    const file = getFile(fileId);
+    if (file) {
+      setPreviewTransfer({
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        progress: 100,
+        status: 'completed',
+        direction: 'outgoing',
+        blob: file
+      });
+    }
+  };
+
+  const handleDownload = (transfer: FileTransferState) => {
+    if (!transfer.blob) return;
+    const url = URL.createObjectURL(transfer.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = transfer.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const formatSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -77,8 +105,7 @@ export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFi
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{formatSize(file.size)}</p>
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-3">
                   {activeTransfers.find(t => t.id === file.id) && (
                     <div className="flex items-center gap-2">
                       {activeTransfers.find(t => t.id === file.id)?.status === 'transferring' ? (
@@ -92,6 +119,13 @@ export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFi
                     </div>
                   )}
                   <button 
+                    onClick={() => handlePreview(file.id)}
+                    className="p-2 text-slate-500 hover:text-blue-400 transition-colors"
+                    title="預覽檔案"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  <button 
                     onClick={() => onRemoveFile(file.id)}
                     className="p-2 text-slate-500 hover:text-rose-400 transition-colors"
                   >
@@ -103,6 +137,13 @@ export function HostControls({ filesList, activeTransfers, onAddFile, onRemoveFi
           )}
         </div>
       </div>
+      {previewTransfer && (
+        <FilePreviewModal
+          transfer={previewTransfer}
+          onClose={() => setPreviewTransfer(null)}
+          onDownload={() => handleDownload(previewTransfer)}
+        />
+      )}
     </div>
   );
 }

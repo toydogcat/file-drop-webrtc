@@ -2,10 +2,22 @@
 <html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/file-drop-webrtc/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>File Drop - 多人 WebRTC P2P 檔案傳輸</title>
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#020617" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
     <script async src="https://www.vercount.one/js" crossorigin="anonymous"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/file-drop-webrtc/sw.js')
+            .then(() => console.log('SW Registered'))
+            .catch(err => console.error('SW Registration failed', err));
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

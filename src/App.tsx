@@ -201,6 +201,7 @@ export default function App() {
                     onAddFile={handleAddFile}
                     onRemoveFile={handleRemoveFile}
                     connectionsCount={activeConnectionsCount}
+                    getFile={(id) => sharedFilesRef.current.get(id)}
                   />
                 ) : (
                   <GuestView 
