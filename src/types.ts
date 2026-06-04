@@ -29,7 +29,7 @@ export interface PeerDetails {
 export type DataChannelMessage =
   | { type: "FILE_LIST"; files: FileMetadata[] }
   | { type: "REQUEST_FILE"; fileId: string; action: "preview" | "download" }
-  | { type: "FILE_START"; fileId: string; totalChunks: number; name: string; mimeType: string; size: number }
+  | { type: "FILE_START"; fileId: string; totalChunks: number; name: string; mimeType: string; size: number; action?: "preview" | "download" }
   | { type: "FILE_CHUNK"; fileId: string; chunkIndex: number; data: string } // base64 string
   | { type: "FILE_END"; fileId: string }
   | { type: "TRANSFER_CANCEL"; fileId: string; reason: string };

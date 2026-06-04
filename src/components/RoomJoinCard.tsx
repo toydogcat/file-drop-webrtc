@@ -5,12 +5,13 @@ interface Props {
   onCreateRoom: (name: string) => void;
   onJoinRoom: (id: string, name: string) => void;
   isConnecting: boolean;
+  initialRoomId?: string;
 }
 
-export function RoomJoinCard({ onCreateRoom, onJoinRoom, isConnecting }: Props) {
-  const [mode, setMode] = useState<'initial' | 'join'>('initial');
+export function RoomJoinCard({ onCreateRoom, onJoinRoom, isConnecting, initialRoomId = '' }: Props) {
+  const [mode, setMode] = useState<'initial' | 'join'>(initialRoomId ? 'join' : 'initial');
   const [name, setName] = useState(localStorage.getItem('fd_name') || '');
-  const [roomId, setRoomId] = useState('');
+  const [roomId, setRoomId] = useState(initialRoomId);
 
   const handleCreate = () => {
     if (!name) return;

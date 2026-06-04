@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import type { FileMetadata, FileTransferState } from '../types';
-import { Download, FileText, CheckCircle2, Loader2, Info } from 'lucide-react';
+import { Download, FileText, CheckCircle2, Loader2, Info, Eye } from 'lucide-react';
+import { FilePreviewModal } from './FilePreviewModal';
 
 interface Props {
   roomId: string;
@@ -10,6 +12,30 @@ interface Props {
 }
 
 export function GuestView({ filesList, activeTransfers, onRequestFile, isPeerConnected }: Props) {
+  const [previewTransfer, setPreviewTransfer] = useState<FileTransferState | null>(null);
+  const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
+
+  const handlePreviewRequest = (fileId: string) => {
+    const existing = activeTransfers.find(t => t.id === fileId);
+    if (existing && existing.status === 'completed') {
+      setPreviewTransfer(existing);
+    } else {
+      setPendingPreviewId(fileId);
+      onRequestFile(fileId, 'preview');
+    }
+  };
+
+  useEffect(() => {
+    if (pendingPreviewId) {
+      const transfer = activeTransfers.find(t => t.id === pendingPreviewId);
+      if (transfer && transfer.status === 'completed') {
+        setPreviewTransfer(transfer);
+        setPendingPreviewId(null);
+      } else if (transfer && transfer.status === 'failed') {
+        setPendingPreviewId(null);
+      }
+    }
+  }, [activeTransfers, pendingPreviewId]);
   const formatSize = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -66,20 +92,40 @@ export function GuestView({ filesList, activeTransfers, onRequestFile, isPeerCon
                   
                   <div className="flex items-center gap-3">
                     {isCompleted ? (
-                      <button 
-                        onClick={() => handleDownload(transfer!)}
-                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-900/20"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        儲存檔案
-                      </button>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setPreviewTransfer(transfer!)}
+                          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                        >
+                          <Eye className="w-4 h-4" />
+                          預覽
+                        </button>
+                        <button 
+                          onClick={() => handleDownload(transfer!)}
+                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-900/20"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          儲存檔案
+                        </button>
+                      </div>
                     ) : isTransferring ? (
                       <div className="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-xl">
                         <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-                        <span className="text-xs font-bold text-slate-300">{transfer.progress}%</span>
+                        <span className="text-xs font-bold text-slate-300">
+                          {transfer.action === 'preview' ? '正在預覽 ' : '正在下載 '}
+                          {transfer.progress}%
+                        </span>
                       </div>
                     ) : (
                       <div className="flex gap-2">
+                        <button 
+                          onClick={() => handlePreviewRequest(file.id)}
+                          disabled={!isPeerConnected}
+                          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                        >
+                          <Eye className="w-4 h-4" />
+                          預覽
+                        </button>
                         <button 
                           onClick={() => onRequestFile(file.id, 'download')}
                           disabled={!isPeerConnected}
@@ -97,6 +143,14 @@ export function GuestView({ filesList, activeTransfers, onRequestFile, isPeerCon
           )}
         </div>
       </div>
+
+      {previewTransfer && (
+        <FilePreviewModal
+          transfer={previewTransfer}
+          onClose={() => setPreviewTransfer(null)}
+          onDownload={() => handleDownload(previewTransfer)}
+        />
+      )}
     </div>
   );
 }

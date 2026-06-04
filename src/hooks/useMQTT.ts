@@ -6,7 +6,7 @@ import type { SignalingMessage } from '../types';
 const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 const TOPIC_PREFIX = 'luna/file-drop';
 
-export function useMQTT(roomId: string, myId: string, myName: string) {
+export function useMQTT(roomId: string, myId: string, myName: string, role: 'idle' | 'host' | 'guest') {
   const [client, setClient] = useState<MqttClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lobbyPlayers, setLobbyPlayers] = useState<{ id: string, name: string }[]>([]);
@@ -30,8 +30,12 @@ export function useMQTT(roomId: string, myId: string, myName: string) {
       setIsConnected(true);
       
       // Subscribe to room topics
-      mqttClient.subscribe(`${TOPIC_PREFIX}/${roomId}/join`);
-      mqttClient.subscribe(`${TOPIC_PREFIX}/${roomId}/lobby_sync`);
+      if (role === 'host') {
+        mqttClient.subscribe(`${TOPIC_PREFIX}/${roomId}/join`);
+      }
+      if (role === 'guest') {
+        mqttClient.subscribe(`${TOPIC_PREFIX}/${roomId}/lobby_sync`);
+      }
       mqttClient.subscribe(`${TOPIC_PREFIX}/${roomId}/signal/${myId}`);
       
       // Publish join message
@@ -72,7 +76,7 @@ export function useMQTT(roomId: string, myId: string, myName: string) {
     return () => {
       mqttClient.end();
     };
-  }, [roomId, myId, myName]);
+  }, [roomId, myId, myName, role]);
 
   const sendSignal = useCallback((toId: string, data: { sdp?: any, ice?: any }) => {
     if (client && isConnected) {

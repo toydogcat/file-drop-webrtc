@@ -19,6 +19,11 @@ export default function App() {
   const [showScanner, setShowScanner] = useState(false);
   
   const myId = useMemo(() => generateId(), []);
+  
+  const initialRoomId = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('room')?.toUpperCase() || '';
+  }, []);
 
   const { 
     isConnected: isMQTTConnected, 
@@ -27,7 +32,7 @@ export default function App() {
     syncLobby, 
     onSignalReceived, 
     onPlayerJoined 
-  } = useMQTT(roomId, myId, myName);
+  } = useMQTT(roomId, myId, myName, role);
 
   const {
     connections,
@@ -40,6 +45,10 @@ export default function App() {
     broadcastFileList,
     sendDataMessage
   } = useWebRTC(myId, sendSignal);
+
+  const activeConnectionsCount = useMemo(() => {
+    return Array.from(connections.values()).filter(state => state === 'connected' || state === 'completed').length;
+  }, [connections]);
 
   // Connect Signaling to WebRTC
   useEffect(() => {
@@ -148,7 +157,7 @@ export default function App() {
             {role !== 'idle' && (
               <div className="hidden sm:flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
                 <Users className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-xs font-bold text-slate-300">{connections.size} 節點</span>
+                <span className="text-xs font-bold text-slate-300">{activeConnectionsCount} 節點</span>
               </div>
             )}
           </div>
@@ -163,6 +172,7 @@ export default function App() {
               onCreateRoom={handleCreateRoom} 
               onJoinRoom={handleJoinRoom}
               isConnecting={!isMQTTConnected && roomId !== ''}
+              initialRoomId={initialRoomId}
             />
             <div className="mt-8 text-center">
               <button 
@@ -180,7 +190,7 @@ export default function App() {
               <div className="flex-1 space-y-8">
                 <ConnectionStatus 
                   isConnected={isMQTTConnected} 
-                  peerCount={connections.size} 
+                  peerCount={activeConnectionsCount} 
                 />
                 
                 {role === 'host' ? (
@@ -190,7 +200,7 @@ export default function App() {
                     activeTransfers={activeTransfers}
                     onAddFile={handleAddFile}
                     onRemoveFile={handleRemoveFile}
-                    connectionsCount={connections.size}
+                    connectionsCount={activeConnectionsCount}
                   />
                 ) : (
                   <GuestView 
@@ -198,7 +208,7 @@ export default function App() {
                     filesList={filesList}
                     activeTransfers={activeTransfers}
                     onRequestFile={handleRequestFile}
-                    isPeerConnected={connections.size > 0}
+                    isPeerConnected={activeConnectionsCount > 0}
                   />
                 )}
               </div>

@@ -46,7 +46,11 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
       channel.close();
       channelsRef.current.delete(id);
     }
-    updateConnectionState(id, 'closed');
+    setConnections(prev => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
 
   const setupPC = useCallback((id: string) => {
@@ -110,7 +114,8 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
       totalChunks,
       name: file.name,
       mimeType: file.type || 'application/octet-stream',
-      size: file.size
+      size: file.size,
+      action
     });
 
     try {
@@ -174,7 +179,8 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
             progress: 0,
             status: 'transferring',
             direction: 'incoming',
-            totalChunks: msg.totalChunks
+            totalChunks: msg.totalChunks,
+            action: msg.action
           }
         ]);
         break;
@@ -198,6 +204,7 @@ export function useWebRTC(_myId: string, sendSignal: (to: string, data: any) => 
         if (finalAcc) {
           const blob = new Blob(finalAcc.chunks, { type: finalAcc.mimeType });
           setActiveTransfers(prev => prev.map(t => t.id === msg.fileId ? { ...t, status: 'completed', progress: 100, blob } : t));
+          incomingChunksRef.current.delete(msg.fileId);
         }
         break;
       case 'TRANSFER_CANCEL':

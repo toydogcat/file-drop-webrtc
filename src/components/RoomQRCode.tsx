@@ -17,8 +17,8 @@ export function RoomQRCode({ roomId }: Props) {
         width: 180,
         margin: 2,
         color: {
-          dark: '#ffffff',
-          light: '#00000000',
+          dark: '#0f172a',
+          light: '#ffffff',
         },
       });
     }
