@@ -1,2 +1,4 @@
 # file-drop-webrtc
-The File Drop.
+
+The [File](https://toydogcat.github.io/file-drop-webrtc/) Drop.
+
