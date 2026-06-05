@@ -1,6 +1,32 @@
 import { useState, useRef, useEffect } from 'react';
 import type { ChatMessage } from '../types';
-import { Send, Users, Shield, User, MessageSquare } from 'lucide-react';
+import { Send, Users, Shield, User, MessageSquare, Copy, Check, Mic, MicOff } from 'lucide-react';
+
+interface SpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
 
 interface Props {
   messages: ChatMessage[];
@@ -13,7 +39,72 @@ interface Props {
 export function Chatroom({ messages, onSendMessage, myId, lobbyPlayers, hostId }: Props) {
   const [inputText, setInputText] = useState('');
   const [showMembers, setShowMembers] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
+
+  const [recognitionSupported] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+  });
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
+  useEffect(() => {
+    const SpeechRecognitionClass =
+      (window as unknown as { SpeechRecognition: new () => SpeechRecognition }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition: new () => SpeechRecognition }).webkitSpeechRecognition;
+
+    if (SpeechRecognitionClass) {
+      const rec = new SpeechRecognitionClass();
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.lang = 'zh-TW';
+
+      rec.onstart = () => {
+        setIsListening(true);
+      };
+
+      rec.onresult = (event: SpeechRecognitionEvent) => {
+        const transcript = event.results[0][0].transcript;
+        setInputText((prev) => prev + transcript);
+      };
+
+      rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      try {
+        recognitionRef.current.start();
+      } catch (err) {
+        console.error('Speech recognition start failed:', err);
+      }
+    }
+  };
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }).catch((err) => {
+      console.error('Failed to copy text: ', err);
+    });
+  };
 
   // Auto scroll to bottom
   const scrollToBottom = () => {
@@ -116,7 +207,7 @@ export function Chatroom({ messages, onSendMessage, myId, lobbyPlayers, hostId }
             return (
               <div 
                 key={msg.id} 
-                className={`flex flex-col max-w-[85%] ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                className={`flex flex-col max-w-[85%] group ${isMe ? 'ml-auto items-end' : 'mr-auto items-start'}`}
               >
                 {/* Sender Name & Badges */}
                 <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px] text-slate-500 font-bold tracking-wide">
@@ -131,15 +222,30 @@ export function Chatroom({ messages, onSendMessage, myId, lobbyPlayers, hostId }
                   )}
                 </div>
 
-                {/* Bubble */}
-                <div 
-                  className={`px-3.5 py-2 text-sm shadow-md transition-all ${
-                    isMe 
-                      ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none border border-blue-500/10' 
-                      : 'bg-slate-800 text-slate-100 rounded-2xl rounded-tl-none border border-slate-700/30'
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap break-words leading-relaxed select-text">{msg.text}</p>
+                {/* Bubble & Copy Container */}
+                <div className={`flex items-center gap-2 w-full ${isMe ? 'flex-row' : 'flex-row-reverse'}`}>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(msg.text, msg.id)}
+                    className="opacity-40 hover:opacity-100 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/50 cursor-pointer shrink-0"
+                    title="複製內容"
+                  >
+                    {copiedId === msg.id ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
+                  <div 
+                    className={`px-3.5 py-2 text-sm shadow-md transition-all ${
+                      isMe 
+                        ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-2xl rounded-tr-none border border-blue-500/10' 
+                        : 'bg-slate-800 text-slate-100 rounded-2xl rounded-tl-none border border-slate-700/30'
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap break-words leading-relaxed select-text">{msg.text}</p>
+                  </div>
                 </div>
 
                 {/* Timestamp */}
@@ -155,13 +261,35 @@ export function Chatroom({ messages, onSendMessage, myId, lobbyPlayers, hostId }
 
       {/* Input area */}
       <form onSubmit={handleSend} className="p-3 bg-slate-950/30 border-t border-slate-800/80 flex gap-2">
-        <input
-          type="text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="輸入訊息..."
-          className="flex-1 bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500/80 rounded-2xl px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition-all"
-        />
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder="輸入訊息..."
+            className={`w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-blue-500/80 rounded-2xl pl-4 ${
+              recognitionSupported ? 'pr-10' : 'pr-4'
+            } py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition-all`}
+          />
+          {recognitionSupported && (
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all cursor-pointer ${
+                isListening 
+                  ? 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 animate-pulse' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+              title={isListening ? '停止語音輸入' : '語音輸入'}
+            >
+              {isListening ? (
+                <MicOff className="w-3.5 h-3.5" />
+              ) : (
+                <Mic className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+        </div>
         <button
           type="submit"
           disabled={!inputText.trim()}
