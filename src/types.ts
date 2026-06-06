@@ -46,6 +46,8 @@ export type DataChannelMessage =
 
 // MQTT Signaling Protocol
 export type SignalingMessage = 
-  | { type: 'join', id: string, name: string }
+  | { type: 'join', id: string, name: string, password?: string }
   | { type: 'lobby_sync', players: { id: string, name: string }[] }
-  | { type: 'signal', from: string, sdp?: any, ice?: any };
+  | { type: 'signal', from: string, sdp?: any, ice?: any }
+  | { type: 'password_required', from: string }
+  | { type: 'password_incorrect', from: string };

@@ -12,7 +12,7 @@ import type { ChatMessage } from '../types';
 import { FolderOpen } from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
-const generateRoomId = () => Math.random().toString(36).substring(2, 7).toUpperCase();
+const generateRoomId = () => Math.random().toString(36).substring(2, 10).toUpperCase();
 
 interface SessionState {
   isConnected: boolean;
@@ -30,6 +30,9 @@ interface Props {
 export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Props) {
   const [role, setRole] = useState<'idle' | 'host' | 'guest'>('idle');
   const [roomId, setRoomId] = useState('');
+  const [roomPassword, setRoomPassword] = useState('');
+  const [guestPasswordAttempt, setGuestPasswordAttempt] = useState('');
+  const [passwordPromptState, setPasswordPromptState] = useState<'none' | 'required' | 'incorrect'>('none');
   const [myName, setMyName] = useState(() => localStorage.getItem('fd_name') || '');
   const [showScanner, setShowScanner] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -41,10 +44,12 @@ export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Pro
     lobbyPlayers, 
     setLobbyPlayers,
     sendSignal, 
+    sendJoin,
     syncLobby, 
     onSignalReceived, 
-    onPlayerJoined 
-  } = useMQTT(roomId, myId, myName, role);
+    onPlayerJoined,
+    onPasswordRequired
+  } = useMQTT(roomId, myId, myName, role, guestPasswordAttempt);
 
   const handleChatMessage = (fromId: string, msg: ChatMessage) => {
     setChatMessages(prev => {
@@ -105,11 +110,19 @@ export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Pro
   // Connect Signaling to WebRTC
   useEffect(() => {
     onSignalReceived.current = ({ from, sdp, ice }) => {
+      // If we receive a signal from the host, it means we passed the password check
+      setPasswordPromptState('none');
       handleSignal(from, sdp, ice);
     };
 
-    onPlayerJoined.current = (id, name) => {
+    onPlayerJoined.current = (id, name, password) => {
       if (role === 'host') {
+        if (roomPassword && password !== roomPassword) {
+          console.log(`Password verification failed for ${name}`);
+          sendSignal(id, { type: password ? 'password_incorrect' : 'password_required' });
+          return;
+        }
+
         setLobbyPlayers(prev => {
           if (prev.some(p => p.id === id)) return prev;
           return [...prev, { id, name }];
@@ -117,7 +130,13 @@ export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Pro
         initiateOffer(id);
       }
     };
-  }, [role, handleSignal, initiateOffer, onSignalReceived, onPlayerJoined, setLobbyPlayers]);
+
+    onPasswordRequired.current = (type) => {
+      if (role === 'guest') {
+        setPasswordPromptState(type === 'password_incorrect' ? 'incorrect' : 'required');
+      }
+    };
+  }, [role, roomPassword, handleSignal, initiateOffer, onSignalReceived, onPlayerJoined, onPasswordRequired, setLobbyPlayers, sendSignal]);
 
   // Host: Keep lobby in sync
   useEffect(() => {
@@ -137,17 +156,19 @@ export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Pro
     });
   }, [isMQTTConnected, activeConnectionsCount, role, roomId, onStateChange]);
 
-  const handleCreateRoom = (name: string) => {
+  const handleCreateRoom = (name: string, password?: string) => {
     setMyName(name);
     localStorage.setItem('fd_name', name);
     setRoomId(generateRoomId());
+    setRoomPassword(password || '');
     setRole('host');
   };
 
-  const handleJoinRoom = (id: string, name: string) => {
+  const handleJoinRoom = (id: string, name: string, password?: string) => {
     setMyName(name);
     localStorage.setItem('fd_name', name);
     setRoomId(id);
+    setGuestPasswordAttempt(password || '');
     setRole('guest');
   };
 
@@ -263,6 +284,60 @@ export function RoomInstance({ id: _id, initialRoomId = '', onStateChange }: Pro
           }}
           onClose={() => setShowScanner(false)}
         />
+      )}
+
+      {passwordPromptState !== 'none' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="text-center space-y-2">
+              <h3 className="text-xl font-bold text-white">此房間受密碼保護</h3>
+              <p className="text-sm text-slate-400">
+                {passwordPromptState === 'incorrect' 
+                  ? '密碼錯誤，請重新輸入。' 
+                  : '此房間需要輸入密碼才能加入連線。'}
+              </p>
+            </div>
+            
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const input = form.elements.namedItem('pwd') as HTMLInputElement;
+              if (input.value) {
+                setGuestPasswordAttempt(input.value);
+                sendJoin(input.value);
+              }
+            }} className="space-y-4">
+              <input
+                type="password"
+                name="pwd"
+                required
+                autoFocus
+                placeholder="輸入密碼"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-semibold"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRole('idle');
+                    setRoomId('');
+                    setPasswordPromptState('none');
+                    setGuestPasswordAttempt('');
+                  }}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 rounded-xl font-semibold transition-all text-sm cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl font-semibold transition-all text-sm cursor-pointer"
+                >
+                  確認
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

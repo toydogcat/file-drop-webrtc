@@ -25,9 +25,15 @@ export function RoomQRCode({ roomId }: Props) {
   }, [joinUrl]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(joinUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    navigator.clipboard.writeText(joinUrl)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch((err) => {
+        console.error('Failed to copy text:', err);
+        // fallback alert or notice if needed
+      });
   };
 
   return (

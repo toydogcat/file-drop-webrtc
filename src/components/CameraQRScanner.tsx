@@ -27,8 +27,8 @@ export function CameraQRScanner({ onScan, onClose }: Props) {
             scannerRef.current?.clear();
           }
         } catch (e) {
-          // If not a URL, try to use the text as room ID if it matches 5 chars
-          if (decodedText.length === 5) {
+          // If not a URL, try to use the text as room ID if it matches 8 chars
+          if (decodedText.length === 8) {
             onScan(decodedText.toUpperCase());
             scannerRef.current?.clear();
           }
