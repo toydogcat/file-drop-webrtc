@@ -1,187 +1,108 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useMQTT } from './hooks/useMQTT';
-import { useWebRTC } from './hooks/useWebRTC';
-import { RoomJoinCard } from './components/RoomJoinCard';
-import { RoomQRCode } from './components/RoomQRCode';
-import { HostControls } from './components/HostControls';
-import { GuestView } from './components/GuestView';
-import { ConnectionStatus } from './components/ConnectionStatus';
-import { CameraQRScanner } from './components/CameraQRScanner';
-import { Chatroom } from './components/Chatroom';
-import type { ChatMessage } from './types';
-import { Share2, FolderOpen, Globe, Users } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { RoomInstance } from './components/RoomInstance';
+import { Share2, Globe, Users, Plus, X, Server, User, CircleDot } from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
-const generateRoomId = () => Math.random().toString(36).substring(2, 7).toUpperCase();
+
+interface Session {
+  id: string;
+  initialRoomId?: string;
+}
+
+interface SessionState {
+  isConnected: boolean;
+  peerCount: number;
+  role: 'idle' | 'host' | 'guest';
+  roomId: string;
+}
 
 export default function App() {
-  const [role, setRole] = useState<'idle' | 'host' | 'guest'>('idle');
-  const [roomId, setRoomId] = useState('');
-  const [myName, setMyName] = useState('');
-  const [showScanner, setShowScanner] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  
-  const myId = useMemo(() => generateId(), []);
-  
   const initialRoomId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('room')?.toUpperCase() || '';
   }, []);
 
-  const { 
-    isConnected: isMQTTConnected, 
-    lobbyPlayers, 
-    setLobbyPlayers,
-    sendSignal, 
-    syncLobby, 
-    onSignalReceived, 
-    onPlayerJoined 
-  } = useMQTT(roomId, myId, myName, role);
+  const defaultSessionId = useMemo(() => generateId(), []);
+  
+  const [sessions, setSessions] = useState<Session[]>(() => [
+    { id: defaultSessionId, initialRoomId: initialRoomId || undefined }
+  ]);
+  const [activeSessionId, setActiveSessionId] = useState<string>(defaultSessionId);
+  const [sessionStates, setSessionStates] = useState<Record<string, SessionState>>({});
 
-  const handleChatMessage = (fromId: string, msg: ChatMessage) => {
-    setChatMessages(prev => {
-      if (prev.some(m => m.id === msg.id)) return prev;
-      return [...prev, msg];
+  const handleStateChange = useCallback((sessionId: string, state: SessionState) => {
+    setSessionStates(prev => {
+      const prevVal = prev[sessionId];
+      if (
+        prevVal &&
+        prevVal.isConnected === state.isConnected &&
+        prevVal.peerCount === state.peerCount &&
+        prevVal.role === state.role &&
+        prevVal.roomId === state.roomId
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [sessionId]: state
+      };
     });
+  }, []);
 
-    // Host relays the message to all other guests
-    if (role === 'host') {
-      connections.forEach((state, id) => {
-        if (id !== fromId && (state === 'connected' || state === 'completed')) {
-          sendDataMessage(id, { type: 'CHAT_MESSAGE', message: msg });
-        }
+  const handleAddSession = () => {
+    const newId = generateId();
+    setSessions(prev => [...prev, { id: newId }]);
+    setActiveSessionId(newId);
+  };
+
+  const handleCloseSession = (idToClose: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (sessions.length <= 1) {
+      // Recreate a single idle session to completely clean up resources
+      const newId = generateId();
+      setSessions([{ id: newId }]);
+      setActiveSessionId(newId);
+      setSessionStates(prev => {
+        const next = { ...prev };
+        delete next[idToClose];
+        return next;
       });
+      return;
     }
-  };
 
-  const handlePeerDisconnected = (id: string) => {
-    if (role === 'host') {
-      setLobbyPlayers(prev => prev.filter(p => p.id !== id));
-    }
-  };
-
-  const {
-    connections,
-    activeTransfers,
-    filesList,
-    setFilesList,
-    sharedFilesRef,
-    initiateOffer,
-    handleSignal,
-    broadcastFileList,
-    sendDataMessage
-  } = useWebRTC(myId, sendSignal, handleChatMessage, handlePeerDisconnected, chatMessages);
-
-  const handleSendMessage = (text: string) => {
-    const newMsg: ChatMessage = {
-      id: `chat-${generateId()}`,
-      senderId: myId,
-      senderName: myName || '訪客',
-      text,
-      timestamp: Date.now()
-    };
-    setChatMessages(prev => [...prev, newMsg]);
-
-    // Send chat message to all connected peers
-    connections.forEach((state, id) => {
-      if (state === 'connected' || state === 'completed') {
-        sendDataMessage(id, { type: 'CHAT_MESSAGE', message: newMsg });
+    setSessions(prev => {
+      const nextSessions = prev.filter(s => s.id !== idToClose);
+      if (activeSessionId === idToClose) {
+        const lastSession = nextSessions[nextSessions.length - 1];
+        if (lastSession) {
+          setActiveSessionId(lastSession.id);
+        }
       }
+      return nextSessions;
     });
-  };
 
-  const activeConnectionsCount = useMemo(() => {
-    return Array.from(connections.values()).filter(state => state === 'connected' || state === 'completed').length;
-  }, [connections]);
-
-  // Connect Signaling to WebRTC
-  useEffect(() => {
-    onSignalReceived.current = ({ from, sdp, ice }) => {
-      handleSignal(from, sdp, ice);
-    };
-
-    onPlayerJoined.current = (id, name) => {
-      if (role === 'host') {
-        setLobbyPlayers(prev => {
-          if (prev.some(p => p.id === id)) return prev;
-          return [...prev, { id, name }];
-        });
-        initiateOffer(id);
-      }
-    };
-  }, [role, handleSignal, initiateOffer, onSignalReceived, onPlayerJoined, setLobbyPlayers]);
-
-  // Host: Keep lobby in sync
-  useEffect(() => {
-    if (role === 'host' && isMQTTConnected) {
-      const players = [{ id: myId, name: myName }, ...lobbyPlayers.filter(p => p.id !== myId)];
-      syncLobby(players);
-    }
-  }, [role, lobbyPlayers, myId, myName, isMQTTConnected, syncLobby]);
-
-  const handleCreateRoom = (name: string) => {
-    setMyName(name);
-    setRoomId(generateRoomId());
-    setRole('host');
-  };
-
-  const handleJoinRoom = (id: string, name: string) => {
-    setMyName(name);
-    setRoomId(id);
-    setRole('guest');
-  };
-
-  const handleAddFile = (file: File) => {
-    const fileId = `file-${generateId()}`;
-    sharedFilesRef.current.set(fileId, file);
-    const newFile = { id: fileId, name: file.name, size: file.size, mimeType: file.type };
-    setFilesList(prev => {
-      const next = [...prev, newFile];
-      setTimeout(() => broadcastFileList(next), 100);
+    setSessionStates(prev => {
+      const next = { ...prev };
+      delete next[idToClose];
       return next;
     });
   };
 
-  const handleRemoveFile = (fileId: string) => {
-    sharedFilesRef.current.delete(fileId);
-    setFilesList(prev => {
-      const next = prev.filter(f => f.id !== fileId);
-      setTimeout(() => broadcastFileList(next), 100);
-      return next;
-    });
-  };
-
-  const handleRequestFile = (fileId: string, action: 'preview' | 'download') => {
-    // In our Star topology, guest always requests from Host
-    // We assume the first peer in our connection map that is 'connected' is the host
-    // Actually, in MQTT room, we could find the host, but let's simplify: 
-    // Host is the one who didn't join but was there.
-    // In this simple version, let's just broadcast the request or find the host ID.
-    // For now, let's assume the guest knows who the host is (the person they connected to).
-    connections.forEach((state, id) => {
-      if (state === 'connected' || state === 'completed') {
-        sendDataMessage(id, { type: 'REQUEST_FILE', fileId, action });
-      }
-    });
-  };
-
-  // URL Auto-join
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const rId = params.get('room');
-    if (rId && role === 'idle') {
-      const savedName = localStorage.getItem('fd_name');
-      if (savedName) {
-        handleJoinRoom(rId.toUpperCase(), savedName);
-      }
-    }
-  }, [role]);
+  const activeSessionState = useMemo<SessionState>(() => {
+    return sessionStates[activeSessionId] || {
+      isConnected: false,
+      peerCount: 0,
+      role: 'idle',
+      roomId: ''
+    };
+  }, [sessionStates, activeSessionId]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-500/30">
+    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-500/30 flex flex-col">
       
       {/* Header */}
-      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
+      <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40 shrink-0">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-xl shadow-lg shadow-blue-900/20">
@@ -190,9 +111,9 @@ export default function App() {
             <div>
               <h1 className="text-sm font-black uppercase tracking-tighter">File Drop</h1>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${isMQTTConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${activeSessionState.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`} />
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                  {isMQTTConnected ? '信令已就緒' : '連接中...'}
+                  {activeSessionState.isConnected ? '信令已就緒' : '連接中...'}
                 </span>
               </div>
             </div>
@@ -202,85 +123,100 @@ export default function App() {
             <a href="https://github.com/toydogcat/file-drop-webrtc" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition-colors">
               <Globe className="w-5 h-5" />
             </a>
-            {role !== 'idle' && (
+            {activeSessionState.role !== 'idle' && (
               <div className="hidden sm:flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
                 <Users className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-xs font-bold text-slate-300">{activeConnectionsCount} 節點</span>
+                <span className="text-xs font-bold text-slate-300">{activeSessionState.peerCount} 節點</span>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        {role === 'idle' ? (
-          <div className="py-12">
-            <RoomJoinCard 
-              onCreateRoom={handleCreateRoom} 
-              onJoinRoom={handleJoinRoom}
-              isConnecting={!isMQTTConnected && roomId !== ''}
-              initialRoomId={initialRoomId}
-            />
-            <div className="mt-8 text-center">
-              <button 
-                onClick={() => setShowScanner(true)}
-                className="inline-flex items-center gap-2 text-slate-500 hover:text-blue-400 transition-colors text-sm font-semibold"
-              >
-                <FolderOpen className="w-4 h-4" />
-                <span>使用 QR Code 掃描加入</span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-8 animate-in fade-in duration-500">
-            <div className="flex flex-col lg:flex-row gap-8">
-              <div className="flex-1 space-y-8">
-                <ConnectionStatus 
-                  isConnected={isMQTTConnected} 
-                  peerCount={activeConnectionsCount} 
-                />
-                
-                {role === 'host' ? (
-                  <HostControls 
-                    roomId={roomId}
-                    filesList={filesList}
-                    activeTransfers={activeTransfers}
-                    onAddFile={handleAddFile}
-                    onRemoveFile={handleRemoveFile}
-                    connectionsCount={activeConnectionsCount}
-                    getFile={(id) => sharedFilesRef.current.get(id)}
-                  />
-                ) : (
-                  <GuestView 
-                    roomId={roomId}
-                    filesList={filesList}
-                    activeTransfers={activeTransfers}
-                    onRequestFile={handleRequestFile}
-                    isPeerConnected={activeConnectionsCount > 0}
-                  />
-                )}
-              </div>
+      {/* Tab Bar */}
+      <div className="border-b border-slate-900 bg-slate-950/60 backdrop-blur-md sticky top-16 z-30 shrink-0">
+        <div className="max-w-6xl mx-auto px-6 flex items-center justify-between overflow-x-auto gap-4 scrollbar-none">
+          <div className="flex items-center gap-1 py-3">
+            {sessions.map((session, index) => {
+              const state = sessionStates[session.id] || {
+                isConnected: false,
+                peerCount: 0,
+                role: 'idle',
+                roomId: ''
+              };
+              const isActive = session.id === activeSessionId;
+              
+              let title = `連線 #${index + 1}`;
+              let Icon = CircleDot;
+              let iconColor = 'text-slate-500';
 
-              <div className="lg:w-80 space-y-6">
-                {role === 'host' && (
-                  <RoomQRCode roomId={roomId} />
-                )}
-                <Chatroom
-                  messages={chatMessages}
-                  onSendMessage={handleSendMessage}
-                  myId={myId}
-                  lobbyPlayers={lobbyPlayers}
-                  hostId={role === 'host' ? myId : (lobbyPlayers[0]?.id || '')}
-                />
-              </div>
-            </div>
+              if (state.role === 'host') {
+                title = `房主: ${state.roomId || '建立中'}`;
+                Icon = Server;
+                iconColor = 'text-blue-400';
+              } else if (state.role === 'guest') {
+                title = `訪客: ${state.roomId}`;
+                Icon = User;
+                iconColor = 'text-emerald-400';
+              }
+
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => setActiveSessionId(session.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      setActiveSessionId(session.id);
+                    }
+                  }}
+                  className={`group flex items-center gap-2.5 px-4 py-2 rounded-xl border text-sm font-semibold transition-all duration-200 shrink-0 select-none cursor-pointer ${
+                    isActive
+                      ? 'bg-slate-900 border-blue-500/30 text-white shadow-lg shadow-blue-500/5'
+                      : 'bg-transparent border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${iconColor} ${state.isConnected && state.role !== 'idle' ? 'animate-pulse' : ''}`} />
+                  <span>{title}</span>
+                  
+                  <button
+                    onClick={(e) => handleCloseSession(session.id, e)}
+                    className="p-0.5 rounded-md text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors opacity-60 md:opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    title="關閉連線"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        )}
+
+          <button
+            onClick={handleAddSession}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-500/30 text-blue-400 hover:text-blue-300 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 my-3"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>開新連線</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <main className="max-w-6xl mx-auto px-6 py-12 flex-1 w-full">
+        {sessions.map((session) => (
+          <div key={session.id} className={session.id === activeSessionId ? 'block' : 'hidden'}>
+            <RoomInstance
+              id={session.id}
+              initialRoomId={session.initialRoomId}
+              onStateChange={(state) => handleStateChange(session.id, state)}
+            />
+          </div>
+        ))}
       </main>
 
       {/* Footer & Vercount */}
-      <footer className="border-t border-slate-900 py-10 mt-12 bg-slate-950">
+      <footer className="border-t border-slate-900 py-10 bg-slate-950 shrink-0">
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex flex-col items-center md:items-start gap-2">
@@ -307,16 +243,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {showScanner && (
-        <CameraQRScanner 
-          onScan={(id) => {
-            handleJoinRoom(id, myName || localStorage.getItem('fd_name') || '訪客');
-            setShowScanner(false);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
     </div>
   );
 }

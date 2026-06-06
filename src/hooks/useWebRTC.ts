@@ -56,6 +56,27 @@ export function useWebRTC(
     onPeerDisconnectedRef.current = onPeerDisconnected;
   }, [onPeerDisconnected]);
 
+  useEffect(() => {
+    return () => {
+      pcsRef.current.forEach((pc) => {
+        try {
+          pc.close();
+        } catch (e) {
+          console.error('Error closing PC:', e);
+        }
+      });
+      channelsRef.current.forEach((channel) => {
+        try {
+          channel.close();
+        } catch (e) {
+          console.error('Error closing channel:', e);
+        }
+      });
+      pcsRef.current.clear();
+      channelsRef.current.clear();
+    };
+  }, []);
+
   const updateConnectionState = (id: string, state: RTCIceConnectionState) => {
     setConnections(prev => {
       const next = new Map(prev);
